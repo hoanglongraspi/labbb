@@ -6,6 +6,9 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
+# Set NODE_ENV to development for build to install devDependencies
+ENV NODE_ENV=development
+
 # Copy package files
 COPY package*.json ./
 COPY prisma ./prisma/
@@ -27,6 +30,9 @@ RUN npm prune --production
 
 # Stage 2: Production
 FROM node:18-alpine
+
+# Set NODE_ENV to production for runtime
+ENV NODE_ENV=production
 
 # Install security updates
 RUN apk update && apk upgrade && apk add --no-cache \

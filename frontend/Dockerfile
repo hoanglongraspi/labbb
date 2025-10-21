@@ -14,6 +14,9 @@ RUN npm ci --only=production && \
 FROM node:18-alpine AS builder
 WORKDIR /app
 
+# Set NODE_ENV to development for build to install devDependencies
+ENV NODE_ENV=development
+
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
 COPY package*.json ./
@@ -43,7 +46,7 @@ RUN apk update && apk upgrade && apk add --no-cache \
     curl \
     && rm -rf /var/cache/apk/*
 
-# Set production environment
+# Set NODE_ENV to production for runtime
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
