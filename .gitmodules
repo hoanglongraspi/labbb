@@ -1,0 +1,6 @@
+[submodule "Portal_Web"]
+	url = git@github.com:chuhuiL/AudioSight_Web.git
+	branch = main
+[submodule "Mobile_App"]
+	url = git@github.com:chuhuiL/AudioSight_Mobile.git
+	branch = main

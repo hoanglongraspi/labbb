@@ -1,0 +1,61 @@
+# GitHub Actions Workflow for Coolify Auto-Deploy
+# Triggers deployment to Coolify when code is pushed to main branch
+
+name: Deploy to Coolify
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trigger Coolify Deployment
+        env:
+          COOLIFY_WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_URL }}
+        run: |
+          curl -X POST "$COOLIFY_WEBHOOK_URL"
+
+      - name: Notify Deployment Started
+        run: |
+          echo "🚀 Deployment triggered to Coolify"
+          echo "Check deployment status at Coolify Dashboard"
+
+  notify:
+    name: Notify Status
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always()
+    
+    steps:
+      - name: Send Discord Notification (Optional)
+        if: success()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          if [ -n "$DISCORD_WEBHOOK" ]; then
+            curl -H "Content-Type: application/json" \
+                 -d '{"content": "✅ Patient Portal deployed successfully to Coolify!"}' \
+                 "$DISCORD_WEBHOOK"
+          fi
+
+      - name: Send Failure Notification
+        if: failure()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          if [ -n "$DISCORD_WEBHOOK" ]; then
+            curl -H "Content-Type: application/json" \
+                 -d '{"content": "❌ Patient Portal deployment to Coolify failed!"}' \
+                 "$DISCORD_WEBHOOK"
+          fi
+

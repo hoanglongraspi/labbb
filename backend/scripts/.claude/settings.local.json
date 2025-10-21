@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/chuhuiliu/PycharmProjects/pythonProject9/participant_protol/backend/src/utils/**)",
+      "Read(//Users/chuhuiliu/PycharmProjects/pythonProject9/participant_protol/backend/**)",
+      "Bash(cat:*)",
+      "Bash(aws sts get-caller-identity:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

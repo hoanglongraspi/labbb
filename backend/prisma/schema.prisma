@@ -1,0 +1,556 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  PATIENT
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum PrimaryCondition {
+  TINNITUS
+  HEARING_LOSS
+  BOTH
+  OTHER
+  MISOPHONIA
+  HYPERACUSIS
+}
+
+enum EvaluationType {
+  INITIAL
+  FOLLOW_UP
+  ANNUAL
+  OTHER
+}
+
+enum EducationCategory {
+  TINNITUS
+  HEARING_LOSS
+  PREVENTION
+  TREATMENT
+  GENERAL
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  VIEW_PATIENT
+  CREATE_PATIENT
+  UPDATE_PATIENT
+  DELETE_PATIENT
+  UPLOAD_AUDIOGRAM
+  DOWNLOAD_AUDIOGRAM
+  DELETE_AUDIOGRAM
+  CREATE_EVALUATION
+  UPDATE_EVALUATION
+  DELETE_EVALUATION
+  CREATE_EDUCATION
+  UPDATE_EDUCATION
+  DELETE_EDUCATION
+  UPDATE_PROFILE
+  CHANGE_PASSWORD
+  CREATE_ACTIVATION_CODE
+  ACTIVATE_ACCOUNT
+  UPDATE_PREFERENCES
+  UPLOAD_TEST_RESULT
+  VIEW_TEST_RESULT
+  DELETE_TEST_RESULT
+  REQUEST_PASSWORD_RESET
+  RESET_PASSWORD
+}
+
+enum ConditionCategory {
+  GOOD_HEARING
+  HEARING_LOSS
+  TINNITUS
+  MISOPHONIA
+  HYPERACUSIS
+}
+
+enum ConditionSeverity {
+  NONE
+  MILD
+  MODERATE
+  SEVERE
+  CRITICAL
+}
+
+enum GoalStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum AchievementType {
+  FIRST_LOGIN
+  PROFILE_COMPLETE
+  ARTICLES_READ
+  SYMPTOM_STREAK
+  GOAL_COMPLETED
+  COMMUNITY_ENGAGEMENT
+  APPOINTMENT_ATTENDED
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum TestType {
+  BPPV
+  AUDIOMETRY
+  LOUDNESS
+  SPEECH_IN_NOISE
+  OTHER
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  role          Role     @default(PATIENT)
+  firstName     String   @map("first_name")
+  lastName      String   @map("last_name")
+  phone         String?
+  isActive      Boolean  @default(true) @map("is_active")
+  lastLogin     DateTime? @map("last_login")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Password reset
+  resetToken          String?   @map("reset_token")
+  resetTokenExpiry    DateTime? @map("reset_token_expiry")
+
+  // Relations
+  patient       Patient?
+  auditLogs     AuditLog[]
+  educationArticles EducationalContent[]
+  uploadedAudiograms Audiogram[] @relation("UploadedBy")
+  summarizedAudiograms Audiogram[] @relation("AudiogramSummary")
+  preferences   UserPreference?
+  activationCodes   ActivationCode[]
+  articleProgress   ArticleProgress[]
+  sentMessages      Message[] @relation("SentMessages")
+  receivedMessages  Message[] @relation("ReceivedMessages")
+  forumPosts        ForumPost[]
+  forumReplies      ForumReply[]
+  achievements      UserAchievement[]
+  engagement        UserEngagement?
+
+  @@index([email])
+  @@index([resetToken])
+  @@map("users")
+}
+
+model Patient {
+  id                  String           @id @default(uuid())
+  userId              String?          @unique @map("user_id")
+  dateOfBirth         DateTime?        @map("date_of_birth")
+  gender              Gender?
+  medicalRecordNumber String           @unique @map("medical_record_number")
+  primaryCondition    PrimaryCondition? @map("primary_condition")
+  notes               String?          @db.Text
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  user                User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  evaluations         Evaluation[]
+  audiograms          Audiogram[]
+  appointments        Appointment[]
+  symptomEntries      SymptomEntry[]
+  goals               PatientGoal[]
+  testResults         TestResult[]
+
+  @@index([userId])
+  @@index([medicalRecordNumber])
+  @@map("patients")
+}
+
+model Evaluation {
+  id                      String          @id @default(uuid())
+  patientId               String          @map("patient_id")
+  evaluationDate          DateTime        @map("evaluation_date")
+  evaluatorName           String          @map("evaluator_name")
+  evaluationType          EvaluationType  @map("evaluation_type")
+  results                 Json?           // Flexible JSON field for condition severities: {"tinnitusSeverity":"MILD","misophoniaSeverity":"NONE","hearingLossSeverity":"MILD","hyperacusisSeverity":"SEVERE"}
+  notes                   String?         @db.Text
+  conditionCategory       ConditionCategory? @map("condition_category")
+
+  createdAt               DateTime        @default(now()) @map("created_at")
+  updatedAt               DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  patient         Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  audiograms      Audiogram[]
+
+  @@index([patientId])
+  @@index([evaluationDate])
+  @@map("evaluations")
+}
+
+model Audiogram {
+  id              String    @id @default(uuid())
+  patientId       String    @map("patient_id")
+  evaluationId    String?   @map("evaluation_id")
+  testDate        DateTime  @map("test_date")
+  fileUrl         String    @map("file_url")
+  fileType        String    @map("file_type")
+  leftEarData     Json?     @map("left_ear_data")  // JSON: { "250": 20, "500": 25, "1000": 30, ... }
+  rightEarData    Json?     @map("right_ear_data") // JSON: { "250": 15, "500": 20, "1000": 25, ... }
+  uploadedBy      String    @map("uploaded_by")
+  summary         String?   @db.Text
+  summaryPrompt   String?   @map("summary_prompt") @db.Text
+  summaryGeneratedAt DateTime? @map("summary_generated_at")
+  summaryGeneratedBy String?  @map("summary_generated_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  patient         Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  evaluation      Evaluation?  @relation(fields: [evaluationId], references: [id], onDelete: SetNull)
+  uploader        User         @relation("UploadedBy", fields: [uploadedBy], references: [id])
+  summaryCreator  User?        @relation("AudiogramSummary", fields: [summaryGeneratedBy], references: [id])
+
+  @@index([patientId])
+  @@index([evaluationId])
+  @@index([testDate])
+  @@index([summaryGeneratedBy])
+  @@map("audiograms")
+}
+
+model EducationalContent {
+  id          String             @id @default(uuid())
+  title       String
+  slug        String             @unique
+  category    EducationCategory
+  content     String?            @db.Text  // Made optional for PDF-based posts
+  summary     String?            @db.Text
+  heroImageUrl String?           @map("hero_image_url")
+  resourceUrl String?            @map("resource_url")
+  pdfUrl      String?            @map("pdf_url")  // S3 URL for uploaded PDF
+  pdfFileName String?            @map("pdf_file_name")  // Original filename for display
+  authorId    String             @map("author_id")
+  isPublished Boolean            @default(false) @map("is_published")
+  viewCount   Int                @default(0) @map("view_count")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  // Relations
+  author      User               @relation(fields: [authorId], references: [id])
+  progress    ArticleProgress[]
+
+  @@index([slug])
+  @@index([category])
+  @@index([isPublished])
+  @@map("educational_content")
+}
+
+model AuditLog {
+  id           String      @id @default(uuid())
+  userId       String      @map("user_id")
+  action       AuditAction
+  resourceType String?     @map("resource_type")
+  resourceId   String?     @map("resource_id")
+  ipAddress    String?     @map("ip_address")
+  userAgent    String?     @map("user_agent")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  // Relations
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model ActivationCode {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  codeHash   String   @map("code_hash")
+  expiresAt  DateTime @map("expires_at")
+  usedAt     DateTime? @map("used_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("activation_codes")
+}
+
+model UserPreference {
+  id                     String  @id @default(uuid())
+  userId                 String  @unique @map("user_id")
+  interestedInTherapy    Boolean @default(false) @map("interested_in_therapy")
+  interestedInConsulting Boolean @default(false) @map("interested_in_consulting")
+  interestedInSupportGroups Boolean @default(false) @map("interested_in_support_groups")
+  interestedInClinicalTrials Boolean @default(false) @map("interested_in_clinical_trials")
+  interestedInDigitalTools Boolean @default(false) @map("interested_in_digital_tools")
+  receiveEmailUpdates    Boolean @default(false) @map("receive_email_updates")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+// ========== Patient Engagement Models ==========
+
+model ArticleProgress {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  articleId   String   @map("article_id")
+  readAt      DateTime @default(now()) @map("read_at")
+  completed   Boolean  @default(false)
+  bookmarked  Boolean  @default(false)
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  article     EducationalContent @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, articleId])
+  @@index([userId])
+  @@index([articleId])
+  @@map("article_progress")
+}
+
+model Appointment {
+  id              String            @id @default(uuid())
+  patientId       String            @map("patient_id")
+  appointmentDate DateTime          @map("appointment_date")
+  type            String            // "Evaluation", "Follow-up", "Consultation"
+  location        String?
+  notes           String?           @db.Text
+  status          AppointmentStatus @default(SCHEDULED)
+  reminderSent    Boolean           @default(false) @map("reminder_sent")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  patient         Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([appointmentDate])
+  @@index([status])
+  @@map("appointments")
+}
+
+model SymptomEntry {
+  id                  String   @id @default(uuid())
+  patientId           String   @map("patient_id")
+  entryDate           DateTime @map("entry_date")
+  tinnitusLevel       Int?     // 1-10 scale
+  hearingClarity      Int?     // 1-10 scale
+  emotionalImpact     Int?     // 1-10 scale
+  moodRating          Int?     // 1-10 scale
+  sleepQuality        Int?     // 1-10 scale
+  stressLevel         Int?     // 1-10 scale
+  triggers            Json?    // ["loud_noise", "stress", "caffeine"]
+  notes               String?  @db.Text
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  patient             Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([entryDate])
+  @@map("symptom_entries")
+}
+
+model PatientGoal {
+  id            String     @id @default(uuid())
+  patientId     String     @map("patient_id")
+  title         String
+  description   String?    @db.Text
+  targetDate    DateTime?  @map("target_date")
+  status        GoalStatus @default(IN_PROGRESS)
+  progress      Int        @default(0) // 0-100%
+  completedAt   DateTime?  @map("completed_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  patient       Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([status])
+  @@map("patient_goals")
+}
+
+model Message {
+  id            String   @id @default(uuid())
+  senderId      String   @map("sender_id")
+  recipientId   String   @map("recipient_id")
+  subject       String?
+  content       String   @db.Text
+  isRead        Boolean  @default(false) @map("is_read")
+  readAt        DateTime? @map("read_at")
+  attachmentUrl String?  @map("attachment_url")
+  threadId      String?  @map("thread_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  sender        User     @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient     User     @relation("ReceivedMessages", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([recipientId])
+  @@index([threadId])
+  @@index([isRead])
+  @@map("messages")
+}
+
+model ForumCategory {
+  id          String      @id @default(uuid())
+  name        String      // "Tinnitus Support", "Hearing Loss", etc.
+  description String?     @db.Text
+  sortOrder   Int         @default(0) @map("sort_order")
+  isActive    Boolean     @default(true) @map("is_active")
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  posts       ForumPost[]
+
+  @@map("forum_categories")
+}
+
+model ForumPost {
+  id          String        @id @default(uuid())
+  categoryId  String        @map("category_id")
+  authorId    String        @map("author_id")
+  title       String
+  content     String        @db.Text
+  isAnonymous Boolean       @default(false) @map("is_anonymous")
+  isPinned    Boolean       @default(false) @map("is_pinned")
+  isLocked    Boolean       @default(false) @map("is_locked")
+  viewCount   Int           @default(0) @map("view_count")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  category    ForumCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  author      User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replies     ForumReply[]
+
+  @@index([categoryId])
+  @@index([authorId])
+  @@index([createdAt])
+  @@map("forum_posts")
+}
+
+model ForumReply {
+  id          String    @id @default(uuid())
+  postId      String    @map("post_id")
+  authorId    String    @map("author_id")
+  content     String    @db.Text
+  isAnonymous Boolean   @default(false) @map("is_anonymous")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  post        ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([authorId])
+  @@map("forum_replies")
+}
+
+model Achievement {
+  id          String           @id @default(uuid())
+  type        AchievementType
+  name        String
+  description String           @db.Text
+  badgeIcon   String           // emoji or icon name
+  points      Int              @default(0)
+  requirement Int              @default(1) // threshold to earn (e.g., 5 articles read)
+
+  earned      UserAchievement[]
+
+  @@unique([type])
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String      @id @default(uuid())
+  userId        String      @map("user_id")
+  achievementId String      @map("achievement_id")
+  earnedAt      DateTime    @default(now()) @map("earned_at")
+
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+  @@map("user_achievements")
+}
+
+model UserEngagement {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  totalPoints     Int      @default(0) @map("total_points")
+  currentStreak   Int      @default(0) @map("current_streak")
+  longestStreak   Int      @default(0) @map("longest_streak")
+  lastCheckIn     DateTime? @map("last_check_in")
+  articlesRead    Int      @default(0) @map("articles_read")
+  goalsCompleted  Int      @default(0) @map("goals_completed")
+  symptomLogs     Int      @default(0) @map("symptom_logs")
+  forumPosts      Int      @default(0) @map("forum_posts")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_engagement")
+}
+
+// ========== Mobile App Integration Models ==========
+
+model TestResult {
+  id              String    @id @default(uuid())
+  patientId       String?   @map("patient_id") // Now optional - can be assigned later
+  participantId   String?   @map("participant_id") // Temporary ID from mobile app
+  testId          String    @unique @map("test_id") // Mobile-generated test ID
+  testType        TestType  @map("test_type")
+  testDate        DateTime  @map("test_date")
+
+  // File storage (S3 keys)
+  videoUrl        String?   @map("video_url")
+  csvUrl          String?   @map("csv_url")
+  questionsUrl    String?   @map("questions_url")
+
+  // Test metadata
+  metadata        Json?     // Test parameters, device info, etc.
+
+  // Analysis results
+  analysis        Json?     // AI/algorithmic analysis results
+  summary         String?   @db.Text
+
+  // Link to evaluation if created by clinician
+  evaluationId    String?   @map("evaluation_id")
+
+  // Assignment tracking
+  assignedBy      String?   @map("assigned_by") // User ID who assigned this test
+  assignedAt      DateTime? @map("assigned_at") // When the test was assigned
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  patient         Patient?  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([participantId])
+  @@index([testId])
+  @@index([testDate])
+  @@index([testType])
+  @@map("test_results")
+}

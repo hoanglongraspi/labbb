@@ -1,0 +1,48 @@
+# Coolify Configuration File
+# This file helps Coolify understand your project structure
+
+# Docker Compose file for production
+compose-file: docker-compose.prod.yml
+
+# Services configuration
+services:
+  - name: backend
+    type: application
+    port: 5000
+    healthcheck: /health
+    domain_prefix: api
+    
+  - name: frontend
+    type: application
+    port: 3000
+    healthcheck: /
+    domain_prefix: www
+    
+  - name: postgres
+    type: database
+    port: 5432
+    persistent_storage:
+      - postgres_data:/var/lib/postgresql/data
+
+# Build settings
+build:
+  backend:
+    context: ./backend
+    dockerfile: Dockerfile
+  frontend:
+    context: ./frontend
+    dockerfile: Dockerfile
+
+# Environment files
+env_file:
+  - .env.example
+
+# Volumes to persist
+volumes:
+  - postgres_data
+  - backend_logs
+
+# Networks
+networks:
+  - patient-portal-network
+

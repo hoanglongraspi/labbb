@@ -1,0 +1,311 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Patient Portal Infrastructure - RDS, S3, Security Groups, IAM'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: patient-portal
+    Description: Project name for resource naming
+
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - development
+      - staging
+      - production
+    Description: Environment name
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+      - db.t3.large
+    Description: RDS instance class
+
+  DBMasterPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: Master password for RDS (min 8 characters)
+
+  DBAllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 1000
+    Description: Database storage size in GB
+
+  MultiAZ:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable Multi-AZ for RDS (production recommended)
+
+Resources:
+  # VPC (using default VPC, or create custom)
+  # For simplicity, this template uses default VPC
+  # For production, consider creating a custom VPC
+
+  # Security Groups
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-${Environment}-backend-sg'
+      GroupDescription: Security group for backend application
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP from internet
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from internet
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-backend-sg'
+        - Key: Environment
+          Value: !Ref Environment
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-${Environment}-rds-sg'
+      GroupDescription: Security group for RDS PostgreSQL
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref BackendSecurityGroup
+          Description: PostgreSQL from backend
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-rds-sg'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # RDS Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub '${ProjectName}-${Environment}-subnet-group'
+      DBSubnetGroupDescription: Subnet group for Patient Portal RDS
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-subnet-group'
+
+  # RDS PostgreSQL Instance
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub '${ProjectName}-${Environment}-db'
+      DBName: patient_portal
+      Engine: postgres
+      EngineVersion: '14.10'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      MasterUsername: postgres
+      MasterUserPassword: !Ref DBMasterPassword
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      MultiAZ: !Ref MultiAZ
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      EnableCloudwatchLogsExports:
+        - postgresql
+      DeletionProtection: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-db'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # S3 Bucket for File Storage
+  FileStorageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-${Environment}-files-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveOldFiles
+            Status: Enabled
+            Prefix: audiograms/
+            Transitions:
+              - TransitionInDays: 730
+                StorageClass: GLACIER
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-files'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # IAM Policy for S3 Access
+  S3AccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${ProjectName}-${Environment}-s3-access'
+      Description: Policy for backend to access S3 bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:DeleteObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt FileStorageBucket.Arn
+              - !Sub '${FileStorageBucket.Arn}/*'
+
+  # IAM User for Backend Application
+  BackendUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub '${ProjectName}-${Environment}-backend-user'
+      ManagedPolicyArns:
+        - !Ref S3AccessPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-backend-user'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Access Key for Backend User
+  BackendUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref BackendUser
+
+  # Secrets Manager - Database URL
+  DatabaseURLSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${ProjectName}/${Environment}/database-url'
+      Description: Database connection URL
+      SecretString: !Sub
+        - 'postgresql://postgres:${Password}@${Endpoint}:5432/patient_portal'
+        - Password: !Ref DBMasterPassword
+          Endpoint: !GetAtt RDSInstance.Endpoint.Address
+
+  # Secrets Manager - JWT Secret
+  JWTSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${ProjectName}/${Environment}/jwt-secret'
+      Description: JWT secret key
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: 'secret'
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  # Secrets Manager - JWT Refresh Secret
+  JWTRefreshSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${ProjectName}/${Environment}/jwt-refresh-secret'
+      Description: JWT refresh secret key
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: 'secret'
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  # CloudWatch Log Group
+  BackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/${ProjectName}/${Environment}/backend'
+      RetentionInDays: 30
+
+  RDSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/rds/${ProjectName}/${Environment}/postgresql'
+      RetentionInDays: 30
+
+Outputs:
+  RDSEndpoint:
+    Description: RDS PostgreSQL endpoint
+    Value: !GetAtt RDSInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-rds-endpoint'
+
+  RDSPort:
+    Description: RDS PostgreSQL port
+    Value: !GetAtt RDSInstance.Endpoint.Port
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-rds-port'
+
+  DatabaseName:
+    Description: Database name
+    Value: patient_portal
+
+  S3BucketName:
+    Description: S3 bucket for file storage
+    Value: !Ref FileStorageBucket
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-s3-bucket'
+
+  BackendSecurityGroupId:
+    Description: Backend security group ID
+    Value: !Ref BackendSecurityGroup
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-backend-sg-id'
+
+  BackendUserAccessKeyId:
+    Description: Access Key ID for backend user
+    Value: !Ref BackendUserAccessKey
+
+  BackendUserSecretAccessKey:
+    Description: Secret Access Key for backend user
+    Value: !GetAtt BackendUserAccessKey.SecretAccessKey
+    NoEcho: true
+
+  DatabaseURLSecretArn:
+    Description: ARN of database URL secret
+    Value: !Ref DatabaseURLSecret
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-db-url-secret-arn'
+
+  JWTSecretArn:
+    Description: ARN of JWT secret
+    Value: !Ref JWTSecret
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-jwt-secret-arn'
+
+  ConnectionString:
+    Description: Database connection string (for reference)
+    Value: !Sub
+      - 'postgresql://postgres:****@${Endpoint}:5432/patient_portal'
+      - Endpoint: !GetAtt RDSInstance.Endpoint.Address

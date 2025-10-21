@@ -1,0 +1,92 @@
+# Docker Compose for Local Development and Testing
+# NOT for production use - for production, use AWS ECS or Elastic Beanstalk
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14-alpine
+    container_name: patient-portal-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: patient_portal
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - patient-portal-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: patient-portal-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/patient_portal?schema=public
+      JWT_SECRET: dev-jwt-secret-change-in-production-min-32-characters
+      JWT_REFRESH_SECRET: dev-jwt-refresh-secret-change-in-production-min-32-chars
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-patient-portal-dev}
+      ALLOWED_ORIGINS: http://localhost:3000
+      RATE_LIMIT_WINDOW_MS: 900000
+      RATE_LIMIT_MAX_REQUESTS: 100
+      LOGIN_RATE_LIMIT_MAX: 5
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - backend_logs:/app/logs
+    networks:
+      - patient-portal-network
+    command: sh -c "npx prisma migrate deploy && npm run dev"
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: patient-portal-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:5000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - patient-portal-network
+
+volumes:
+  postgres_data:
+    driver: local
+  backend_logs:
+    driver: local
+
+networks:
+  patient-portal-network:
+    driver: bridge
