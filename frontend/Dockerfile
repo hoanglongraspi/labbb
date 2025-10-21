@@ -34,8 +34,14 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 # Disable Next.js telemetry
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Build the application
-RUN npm run build
+# Build the application with verbose output
+RUN npm run build --verbose || (echo "Build failed! Checking environment..." && \
+    echo "NODE_ENV: $NODE_ENV" && \
+    echo "NEXT_PUBLIC_API_URL: $NEXT_PUBLIC_API_URL" && \
+    echo "Checking if dependencies installed..." && \
+    ls -la node_modules/@types/node && \
+    ls -la node_modules/typescript && \
+    exit 1)
 
 # Stage 3: Production runner
 FROM node:18-alpine AS runner
